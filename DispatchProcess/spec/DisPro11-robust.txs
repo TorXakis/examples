@@ -1,0 +1,110 @@
+{-
+TorXakis - Model Based Testing
+Copyright (c) 2015-2017 TNO and Radboud University
+See LICENSE at root directory of this repository.
+-}
+
+
+-- ----------------------------------------------------------------------------------------- --
+-- Dispatch Process
+-- ----------------------------------------------------------------------------------------- --
+-- Job Data
+
+TYPEDEF  JobData  ::=  JobData  {  jobId          :: Int
+                                ;  jobDescription :: String
+                                ;  x, y           :: Int
+                                }
+ENDDEF
+
+
+FUNCDEF  isValidJob ( jobdata :: JobData )  :: Bool ::=
+           ( jobId(jobdata) > 0 ) /\ ( ( jobId(jobdata) % 2 ) == 0 )
+       /\  strinre ( jobDescription(jobdata), REGEX('[A-Z][0-9]{2}[a-z]+') )
+       /\  ( x(jobdata) > 0 )
+       /\  ( y(jobdata) > 0 )
+       /\  ( IF (x(jobdata) < y(jobdata)) THEN
+                ( abs(x(jobdata) - y(jobdata)) < (100 * x(jobdata) ))
+            ELSE
+                ( abs(x(jobdata) - y(jobdata)) < (100 * y(jobdata) ))
+            FI )
+ENDDEF
+
+-- ----------------------------------------------------------------------------------------- --
+-- Job Output
+
+TYPEDEF  JobOut  ::=  JobOut  {  jobId     :: Int
+                              ;  processor :: Int
+                              ;  gcd       :: Int
+                              }
+                    | Error   {  reason :: String }
+ENDDEF
+
+-- ----------------------------------------------------------------------------------------- --
+-- Greatest Common Divisor
+-- https://en.wikipedia.org/wiki/Euclidean_algorithm
+FUNCDEF  gcd ( a, b :: Int ) :: Int ::=
+    IF b == 0 THEN  a
+              ELSE  gcd (b, a % b)
+    FI
+ENDDEF
+
+-- ----------------------------------------------------------------------------------------- --
+
+PROCDEF  processor [ Start :: JobData; Finish :: JobOut ] ( procnum :: Int ) ::=
+             Start ? job
+        >->  Finish ! JobOut ( jobId(job)
+                             , procnum
+                             , gcd ( x(job) , y(job) )
+                             )
+        >->  processor [ Start, Finish ] ( procnum )
+ENDDEF
+
+
+-- ----------------------------------------------------------------------------------------- --
+
+
+PROCDEF  processors [ Start :: JobData; Finish :: JobOut ] ( procnum :: Int ) ::=
+             processor [ Start, Finish ] ( procnum )
+        |||
+             [[ procnum > 1 ]]  =>>  processors [ Start, Finish ] ( procnum-1 )
+ENDDEF
+
+-- ----------------------------------------------------------------------------------------- --
+
+
+PROCDEF  dispatcher [ Job, Dispatch :: JobData; Finish :: JobOut ] ( ) ::=
+            (      Job ? job  [[ isValidJob(job) ]]
+              >->  Dispatch !job
+              >->  dispatcher [ Job, Dispatch, Finish ]  ( )
+            )
+        ##
+            (      Job ? job  [[ not ( isValidJob(job) ) ]]
+              >->  Finish ! Error ( "Non-Valid Input Data" )
+              >->  dispatcher [ Job, Dispatch, Finish ]  ( )
+            )
+ENDDEF
+
+-- ----------------------------------------------------------------------------------------- --
+
+MODELDEF Model ::=
+    CHAN IN    Job   
+    CHAN OUT   Finish
+
+    BEHAVIOUR
+        HIDE  [ Job2Proc :: JobData ]
+        IN
+                dispatcher [ Job, Job2Proc, Finish ]  ( )
+            |[ Job2Proc ]|
+                processors [ Job2Proc, Finish ] ( 3 )
+        NI
+ENDDEF
+-- ----------------------------------------------------------------------------------------- --
+
+CHANDEF Channels ::=
+    Job    :: JobData;
+    Finish :: JobOut
+ENDDEF
+
+-- ----------------------------------------------------------------------------------------- --
+--                                                                                           --
+-- ----------------------------------------------------------------------------------------- --
