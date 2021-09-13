@@ -1,0 +1,41 @@
+
+STAUTDEF  helloWorld [ Inp, Outp :: String ] ( )
+ ::=
+    STATE
+        init, noname, named
+    VAR
+        name :: String
+    INIT
+        init { name := "" }
+    TRANS
+        init    ->  Outp ! "Hello World!"                                         ->  noname
+        noname  ->  Inp ? n [[ strinre(n, REGEX('[A-Z][a-z]+')) ]] { name := n }  ->  named
+        named   ->  Outp ! "Hello " ++ name ++ "!"                                ->  noname
+ENDDEF
+
+CHANDEF  Chans
+ ::=
+      Input  :: String ;
+      Output :: String
+ENDDEF
+
+MODELDEF  Hello
+ ::=
+      CHAN IN   Input
+      CHAN OUT  Output
+ 
+      BEHAVIOUR  
+                helloWorld [Input, Output] ()
+ENDDEF
+
+CNECTDEF  Sut
+ ::=
+     CLIENTSOCK
+
+     CHAN OUT  Input   HOST "localhost" PORT 7890
+     ENCODE    Input   ? s  ->  ! s
+
+     CHAN IN   Output  HOST "localhost" PORT 7890
+     DECODE    Output  ! s  <-  ? s
+ENDDEF
+
