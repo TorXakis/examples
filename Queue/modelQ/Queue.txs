@@ -1,0 +1,145 @@
+{-
+TorXakis - Model Based Testing
+Copyright (c) 2015-2021 ESI (TNO) and Radboud University
+See LICENSE at root directory of this repository.
+-}
+
+-- ----------------------------------------------------------------------------------------- --
+-- Model of a Queue of Integers,
+-- with inputs 'In !Enq(x)' and 'In !Deq', and with output 'Out !x'. 
+
+
+-- ----------------------------------------------------------------------------------------- --
+-- General Data Definitions
+
+-- ----------------------------------------------------------------------------------------- --
+--   IntList :  a list of integers
+--     constructors:
+--       Nil       :  empty list
+--       Cons(h,t) :  list with head h and tail t
+--     generated standard functions:
+--       isNil(l)  :  check if list l matches Nil
+--       isCons(l) :  check if list l matches Cons(h,t)
+--       hd(l)     :  the head of list l, if isCons(l) 
+--       tl(l)     :  the tail of list l, if isCons(l) 
+
+TYPEDEF  IntList  ::=   Nil
+                      | Cons  { hd ::  Int
+                              ; tl ::  IntList
+                              }
+ENDDEF
+
+
+-- ----------------------------------------------------------------------------------------- --
+--   add(x,l) :  add integer x at the end of integer list l
+
+FUNCDEF  add ( x :: Int; l :: IntList ) :: IntList
+   ::=
+        IF    isNil(l)
+        THEN  Cons(x,Nil)
+        ELSE  Cons(hd(l),add(x,tl(l)))
+        FI
+ENDDEF
+
+
+-- ----------------------------------------------------------------------------------------- --
+-- QueueOp :  operations on a queue
+--     constructors:
+--       Enq(val)   :  Enqueue integer val
+--       Deq        :  request to Dequeue the next value
+--     generated standard functions:
+--       isEnq(qop) :  check if queue operator qop matches Enq(v)
+--       isDeq(qop) :  check if queue operator qop matches Deq
+--       val(qop)   :  the value of queue operator qop, if isEnq(qop)
+
+TYPEDEF  QueueOp   ::=   Enq  { val :: Int }
+                       | Deq
+ENDDEF
+
+
+-- ----------------------------------------------------------------------------------------- --
+-- overflow(x) indicates whether integer x is an overflow (for Java)
+--   TorXakis allows unbounded integers, but most programming languages of SUTs
+--   have bounded integers
+
+FUNCDEF overflow (x :: Int) :: Bool
+   ::=
+        (x < -2147483648) \/ ( x > +2147483647)
+ENDDEF
+
+
+-- ----------------------------------------------------------------------------------------- --
+-- channel definitions
+--   In  :  channel with messages of type QueueOp
+--   Out :  channel with messages of type Int
+
+CHANDEF  Channels  ::=    In   :: QueueOp
+                        ; Out  :: Int
+ENDDEF
+
+
+-- ----------------------------------------------------------------------------------------- --
+-- state automaton definition for a queue
+--   communicating on channel Inp  with messages of type QueueOp
+--   communicating on channel Outp with messages of type Int,
+--   without parameters
+--   if overflow-checking is desired, then the first one can be replaced by:
+--     qstate -> Inp ? qop
+--               [[ IF isEnq(qop) THEN not(overflow(val(qop))) ELSE False FI ]]
+--               { buf := add(val(qop),buf) }                                    ->  qstate
+
+STAUTDEF queueStaut [ Inp :: QueueOp; Outp :: Int ] ( )
+   ::=
+        STATE
+            qstate, qout
+        VAR
+            buf :: IntList
+        INIT
+            qstate { buf := Nil }
+        TRANS
+            qstate  ->  Inp ? qop [[ isEnq(qop) ]] { buf := add(val(qop),buf) }  ->  qstate
+            qstate  ->  Inp ? qop [[ isDeq(qop) /\ isNil(buf) ]]                 ->  qstate
+            qstate  ->  Inp ? qop [[ isDeq(qop) /\ not(isNil(buf)) ]]            ->  qout
+            qout    ->  Outp ! hd(buf) { buf := tl(buf) }                        ->  qstate
+ENDDEF
+
+
+-- ----------------------------------------------------------------------------------------- --
+-- model definition for the Queue system
+--   declaring channel In  as input channel  (Queue system point of view)
+--   declaring channel Out as output channel (Queue system point of view)
+--   initializing queueStaut with channels In and Out and no parameters
+
+MODELDEF  Queue
+   ::=
+        CHAN IN    In
+        CHAN OUT   Out
+
+        BEHAVIOUR  queueStaut [ In, Out ] ( )
+ENDDEF
+
+
+-- ----------------------------------------------------------------------------------------- --
+-- definition of the tester connection to the sut
+--   the tester is acting as client on a socket
+--   channel In is declared as output (tester point of view), mapped to socket (localhost,7890),
+--     a message of type QueueOp on channel In is encoded as string with standard function toString
+--   channel Out is declared as input (tester point of view), mapped to socket (localhost,7890),
+--     a received string on socket (localhost,7890), which must represent an integer,
+--     is decoded with standard function fromString and forwarded to channel Out
+
+CNECTDEF  Sut
+   ::=
+        CLIENTSOCK
+
+        CHAN  OUT  In                         HOST "localhost"  PORT 7890
+        ENCODE     In ? qop               ->  ! toString(qop)
+
+        CHAN  IN   Out                        HOST "localhost"  PORT 7890
+        DECODE     Out ! fromString(s)   <-   ? s
+ENDDEF
+
+
+-- ----------------------------------------------------------------------------------------- --
+-- ----------------------------------------------------------------------------------------- --
+
